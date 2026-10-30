@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026103002 -->
+<!-- v2026103003 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -1030,14 +1030,23 @@ function calcCashClose(store){
 
   // Sum today's cash payments for this store from orders
   const today = getMacauBizDate();
+  // Helper: convert ISO date string to Macau business date (UTC+8, 3am cutoff)
+  const toMacauBiz=(dateStr)=>{
+    if(!dateStr) return '';
+    const d=new Date(dateStr);
+    const macau=new Date(d.getTime()+8*3600000);
+    const biz=macau.getUTCHours()<3?new Date(macau.getTime()-24*3600000):macau;
+    return biz.toISOString().slice(0,10);
+  };
   let cashReceived = 0;
   orders.forEach(o=>{
     if(o.store!==storeKey) return;
     (o.payments||[]).forEach(p=>{
-      if(isCashMethod(p.method) && p.date && p.date.startsWith(today)) cashReceived+=p.amount||0;
+      // Use Macau business date comparison (not raw UTC startsWith)
+      if(isCashMethod(p.method) && p.date && toMacauBiz(p.date)===today) cashReceived+=p.amount||0;
     });
-    // Fallback for old orders
-    if(!(o.payments||[]).length && isCashMethod(o.payMethod) && o.createdAt && o.createdAt.startsWith(today)){
+    // Fallback for old orders without payments array
+    if(!(o.payments||[]).length && isCashMethod(o.payMethod) && toMacauBiz(o.createdAt)===today){
       cashReceived+=o.paidAmount||0;
     }
   });
@@ -2108,13 +2117,20 @@ function executeDeleteOrder(id, reason){
 
   // Reverse any cash payments made today for this order
   const today=getMacauBizDate();
+  const toMacauBizDel=(dateStr)=>{
+    if(!dateStr) return '';
+    const d=new Date(dateStr);
+    const macau=new Date(d.getTime()+8*3600000);
+    const biz=macau.getUTCHours()<3?new Date(macau.getTime()-24*3600000):macau;
+    return biz.toISOString().slice(0,10);
+  };
   (o.payments||[]).forEach(p=>{
-    if(isCashMethod(p.method) && p.date && p.date.startsWith(today)){
+    if(isCashMethod(p.method) && p.date && toMacauBizDel(p.date)===today){
       reverseCashClose(o.store, p.amount||0);
     }
   });
   // Fallback for old orders
-  if(!(o.payments||[]).length && isCashMethod(o.payMethod) && o.createdAt && o.createdAt.startsWith(today)){
+  if(!(o.payments||[]).length && isCashMethod(o.payMethod) && toMacauBizDel(o.createdAt)===today){
     reverseCashClose(o.store, o.paidAmount||0);
   }
 
