@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026103003 -->
+<!-- v2026103004 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -647,6 +647,13 @@
             <option>付款碼</option>
           </select>
         </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:4px;">充值店舖</label>
+        <select id="credit-store" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:14px;outline:none;background:var(--surface);">
+          <option value="高士德店">高士德店</option>
+          <option value="下環店">下環店</option>
+        </select>
       </div>
       <div style="margin-bottom:12px;">
         <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:4px;">備註（選填）</label>
@@ -1608,12 +1615,13 @@ function addCredit(){
   const phone=document.getElementById('credit-phone').value.trim()||('無電話-'+Date.now().toString().slice(-6));
   const amount=parseFloat(document.getElementById('credit-amount').value)||0;
   const payMethod=document.getElementById('credit-paymethod').value;
+  const store=document.getElementById('credit-store').value||'高士德店';
   const note=document.getElementById('credit-note').value.trim();
   if(!name){alert('請輸入客戶姓名');return;}
   if(amount<=0){alert('請輸入充值金額');return;}
   credits=loadCredits();
   let account=credits.find(function(c){return c.phone===phone;});
-  const txn={id:'TX'+Date.now(),type:'topup',amount,payMethod,date:new Date().toISOString(),note,addedBy:currentRole};
+  const txn={id:'TX'+Date.now(),type:'topup',amount,payMethod,store,date:new Date().toISOString(),note,addedBy:currentRole};
   if(account){
     account.transactions=account.transactions||[];
     account.transactions.push(txn);
@@ -2681,7 +2689,7 @@ function renderDashboard(){
   let totalRevToday=0;
   const storePayMap={};
   const allStores=['高士德店','下環店','上門收送'];
-  allStores.forEach(s=>{storePayMap[s]={現金:0,收銀機:0,網銀轉賬:0,付款碼:0,充值扣除:0,total:0,unpaid:0,orderTotal:0,orderCount:0,orderIds:[]};});
+  allStores.forEach(s=>{storePayMap[s]={現金:0,收銀機:0,網銀轉賬:0,付款碼:0,充值扣除:0,充值入帳:0,total:0,unpaid:0,orderTotal:0,orderCount:0,orderIds:[]};});
 
   const toMacauBizDate=(dateStr)=>{
     if(!dateStr) return '';
@@ -2743,6 +2751,22 @@ function renderDashboard(){
     }
   });
 
+  // ── Count today's credit top-ups (充值入帳) from credits store ──
+  const creditsData=loadCredits();
+  creditsData.forEach(function(c){
+    (c.transactions||[]).forEach(function(t){
+      if(t.type!=='topup') return;
+      if(toMacauBizDate(t.date)!==todayStr) return;
+      const amt=t.amount||0;
+      if(amt<=0) return;
+      const tStore=t.store||'高士德店'; // default to 高士德店 for old records without store
+      if(!storePayMap[tStore]) storePayMap[tStore]={現金:0,收銀機:0,網銀轉賬:0,付款碼:0,充值扣除:0,充值入帳:0,total:0,unpaid:0,orderTotal:0,orderCount:0,orderIds:[]};
+      storePayMap[tStore]['充值入帳']=(storePayMap[tStore]['充值入帳']||0)+amt;
+      storePayMap[tStore].total+=amt;
+      totalRevToday+=amt;
+    });
+  });
+
   // ── Render summary card ──
   // Use business date (todayStr) for display to match order filtering logic
   const dayNames=['日','一','二','三','四','五','六'];
@@ -2751,8 +2775,8 @@ function renderDashboard(){
   document.getElementById('today-date-summary').textContent=dateLabel;
   if(document.getElementById('today-date')) document.getElementById('today-date').textContent=dateLabel;
 
-  const payMethods=['現金','收銀機','網銀轉賬','付款碼','充值扣除'];
-  const methodLabels={現金:'收取現金',收銀機:'收銀機',網銀轉賬:'網銀轉賬',付款碼:'付款碼',充值扣除:'充值入帳'};
+  const payMethods=['現金','收銀機','網銀轉賬','付款碼','充值扣除','充值入帳'];
+  const methodLabels={現金:'收取現金',收銀機:'收銀機',網銀轉賬:'網銀轉賬',付款碼:'付款碼',充值扣除:'充值消費扣除',充值入帳:'💳 充值入帳'};
 
   // Load cash register data
   let cashData={};
