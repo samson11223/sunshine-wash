@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026103001 -->
+<!-- v2026103002 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -2677,7 +2677,7 @@ function renderDashboard(){
 
   orders.forEach(o=>{
     const store=o.store||'其他';
-    if(!storePayMap[store]) storePayMap[store]={現金:0,收銀機:0,網銀轉賬:0,付款碼:0,total:0,unpaid:0,orderTotal:0,orderCount:0,orderIds:[]};
+    if(!storePayMap[store]) storePayMap[store]={現金:0,收銀機:0,網銀轉賬:0,付款碼:0,充值扣除:0,total:0,oldRevToday:0,unpaid:0,orderTotal:0,orderCount:0,orderIds:[]};
     const s=storePayMap[store];
     const orderDate=toMacauBizDate(o.createdAt);
     const isCreatedToday=orderDate===todayStr;
@@ -2702,6 +2702,8 @@ function renderDashboard(){
         s[method]=(s[method]||0)+amt;
         s.total+=amt;
         totalRevToday+=amt;
+        // Track old-order repayments separately
+        if(!isCreatedToday) s.oldRevToday=(s.oldRevToday||0)+amt;
       });
     } else if(isCreatedToday&&o.payMethod!=='暫不付款'&&o.paidAmount>0){
       // Old format orders (no payments array), created today
@@ -2711,11 +2713,17 @@ function renderDashboard(){
       totalRevToday+=o.paidAmount;
     }
     // 充值扣除訂單：creditDeducted 計入充值入帳（創建日期=今天）
-    if(isCreatedToday&&(o.payMethod==='充值扣除'||o.payMethod==='充值扣除+補款')&&o.creditDeducted>0){
+    if((o.payMethod==='充值扣除'||o.payMethod==='充值扣除+補款')&&o.creditDeducted>0){
       const cAmt=o.creditDeducted||0;
-      s['充值扣除']=(s['充值扣除']||0)+cAmt;
-      s.total+=cAmt;
-      totalRevToday+=cAmt;
+      // Find if credit payment was today
+      const creditPay=(o.payments||[]).find(p=>p.method&&p.method.includes('充值'));
+      const creditPayDate=creditPay?toMacauBizDate(creditPay.date):(isCreatedToday?todayStr:null);
+      if(creditPayDate===todayStr){
+        s['充值扣除']=(s['充值扣除']||0)+cAmt;
+        s.total+=cAmt;
+        totalRevToday+=cAmt;
+        if(!isCreatedToday) s.oldRevToday=(s.oldRevToday||0)+cAmt;
+      }
     }
   });
 
@@ -2765,9 +2773,16 @@ function renderDashboard(){
     // Today's orders
     summaryHTML+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border);">';
     summaryHTML+='<div><span style="font-size:11px;color:var(--text-muted);">訂單總額</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;color:var(--text);font-size:15px;">$'+s.orderTotal+'</span></div>';
-    summaryHTML+='<div><span style="font-size:11px;color:var(--success);">已收款</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;color:var(--success);font-size:15px;">$'+s.total+'</span></div>';
+    summaryHTML+='<div><span style="font-size:11px;color:var(--success);">已收款</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;color:var(--success);font-size:15px;">$'+(s.total-(s.oldRevToday||0))+'</span></div>';
     summaryHTML+='<div><span style="font-size:11px;color:var(--danger);">未收款</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;color:'+(s.unpaid>0?'var(--danger)':'var(--text-muted)')+';font-size:15px;">$'+s.unpaid+'</span></div>';
     summaryHTML+='</div>';
+    // Show old-order repayments if any
+    if((s.oldRevToday||0)>0){
+      summaryHTML+='<div style="background:var(--info-light);border-radius:8px;padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">';
+      summaryHTML+='<span style="font-size:12px;color:var(--info);font-weight:600;">🔄 舊單今日到店付款</span>';
+      summaryHTML+='<span style="font-family:\'DM Mono\',monospace;font-weight:700;color:var(--info);font-size:14px;">+$'+s.oldRevToday+'</span>';
+      summaryHTML+='</div>';
+    }
 
     // Payment breakdown
     summaryHTML+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;">';
