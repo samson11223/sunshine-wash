@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026102701 -->
+<!-- v2026103001 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -2665,7 +2665,7 @@ function renderDashboard(){
   let totalRevToday=0;
   const storePayMap={};
   const allStores=['高士德店','下環店','上門收送'];
-  allStores.forEach(s=>{storePayMap[s]={現金:0,收銀機:0,網銀轉賬:0,付款碼:0,total:0,unpaid:0,orderTotal:0,orderCount:0,orderIds:[]};});
+  allStores.forEach(s=>{storePayMap[s]={現金:0,收銀機:0,網銀轉賬:0,付款碼:0,充值扣除:0,total:0,unpaid:0,orderTotal:0,orderCount:0,orderIds:[]};});
 
   const toMacauBizDate=(dateStr)=>{
     if(!dateStr) return '';
@@ -2710,6 +2710,13 @@ function renderDashboard(){
       s.total+=o.paidAmount;
       totalRevToday+=o.paidAmount;
     }
+    // 充值扣除訂單：creditDeducted 計入充值入帳（創建日期=今天）
+    if(isCreatedToday&&(o.payMethod==='充值扣除'||o.payMethod==='充值扣除+補款')&&o.creditDeducted>0){
+      const cAmt=o.creditDeducted||0;
+      s['充值扣除']=(s['充值扣除']||0)+cAmt;
+      s.total+=cAmt;
+      totalRevToday+=cAmt;
+    }
   });
 
   // ── Render summary card ──
@@ -2720,8 +2727,8 @@ function renderDashboard(){
   document.getElementById('today-date-summary').textContent=dateLabel;
   if(document.getElementById('today-date')) document.getElementById('today-date').textContent=dateLabel;
 
-  const payMethods=['現金','收銀機','網銀轉賬','付款碼'];
-  const methodLabels={現金:'收取現金',收銀機:'收銀機',網銀轉賬:'網銀轉賬',付款碼:'付款碼'};
+  const payMethods=['現金','收銀機','網銀轉賬','付款碼','充值扣除'];
+  const methodLabels={現金:'收取現金',收銀機:'收銀機',網銀轉賬:'網銀轉賬',付款碼:'付款碼',充值扣除:'充值入帳'};
 
   // Load cash register data
   let cashData={};
@@ -2735,9 +2742,12 @@ function renderDashboard(){
     const s=storePayMap[store];
     const isGSD=store==='高士德店';
     const isHX=store==='下環店';
-    const cashOpen=isGSD?(parseFloat(cashData.gsdOpen)||0):isHX?(parseFloat(cashData.hxOpen)||0):0;
-    const cashTaken=isGSD?(parseFloat(cashData.gsdTaken)||0):isHX?(parseFloat(cashData.hxTaken)||0):0;
-    const cashClose=isGSD?(parseFloat(cashData.gsdClose)||0):isHX?(parseFloat(cashData.hxClose)||0):0;
+    const _cashOpenRaw=isGSD?cashData.gsdOpen:isHX?cashData.hxOpen:undefined;
+    const _cashTakenRaw=isGSD?cashData.gsdTaken:isHX?cashData.hxTaken:undefined;
+    const _cashCloseRaw=isGSD?cashData.gsdClose:isHX?cashData.hxClose:undefined;
+    const cashOpen=(_cashOpenRaw!==undefined&&_cashOpenRaw!=='')?parseFloat(_cashOpenRaw):null;
+    const cashTaken=(_cashTakenRaw!==undefined&&_cashTakenRaw!=='')?parseFloat(_cashTakenRaw):null;
+    const cashClose=(_cashCloseRaw!==undefined&&_cashCloseRaw!=='')?parseFloat(_cashCloseRaw):null;
     const storeColor={'高士德店':'#3A7BD5','下環店':'#2E9E6A','上門收送':'#9B5EBF'}[store]||'#999';
 
     summaryHTML+='<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:12px;border-left:4px solid '+storeColor+';">';
@@ -2746,9 +2756,9 @@ function renderDashboard(){
     // Cash register (not for 上門收送)
     if(store!=='上門收送'){
       summaryHTML+='<div style="display:flex;gap:12px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border);flex-wrap:wrap;">';
-      summaryHTML+='<div><span style="font-size:11px;color:var(--text-muted);">開店現金</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;font-size:15px;">'+(cashOpen?'$'+cashOpen:'—')+'</span></div>';
-      summaryHTML+='<div><span style="font-size:11px;color:var(--text-muted);">老闆取走</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;font-size:15px;color:var(--danger);">'+(cashTaken>0?'-$'+cashTaken:'—')+'</span></div>';
-      summaryHTML+='<div><span style="font-size:11px;color:var(--sun-dark);">閉店現金</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;font-size:15px;color:var(--sun-dark);">'+(cashClose?'$'+cashClose:'—')+'</span></div>';
+      summaryHTML+='<div><span style="font-size:11px;color:var(--text-muted);">開店現金</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;font-size:15px;">'+(cashOpen!==null?'$'+cashOpen:'—')+'</span></div>';
+      summaryHTML+='<div><span style="font-size:11px;color:var(--text-muted);">老闆取走</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;font-size:15px;color:var(--danger);">'+(cashTaken!==null&&cashTaken>0?'-$'+cashTaken:'—')+'</span></div>';
+      summaryHTML+='<div><span style="font-size:11px;color:var(--sun-dark);">閉店現金</span><br><span style="font-family:\'DM Mono\',monospace;font-weight:700;font-size:15px;color:var(--sun-dark);">'+(cashClose!==null?'$'+cashClose:'—')+'</span></div>';
       summaryHTML+='</div>';
     }
 
