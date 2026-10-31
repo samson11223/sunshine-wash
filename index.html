@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026103005 -->
+<!-- v2026103101 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -2861,10 +2861,10 @@ function renderDashboard(){
       summaryHTML+='</div>';
     }
 
-    // Payment breakdown
-    summaryHTML+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;">';
+    // Payment breakdown (single column to avoid truncation on narrow screens)
+    summaryHTML+='<div style="display:flex;flex-direction:column;gap:0;">';
     payMethods.forEach(function(m){
-      summaryHTML+='<div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border);">';
+      summaryHTML+='<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border);">';
       summaryHTML+='<span style="color:var(--text-muted);">'+methodLabels[m]+'</span>';
       summaryHTML+='<span style="font-family:\'DM Mono\',monospace;font-weight:'+(s[m]>0?'700':'400')+';color:'+(s[m]>0?'var(--text)':'var(--text-muted)')+';">$'+(s[m]||0)+'</span>';
       summaryHTML+='</div>';
@@ -3111,8 +3111,40 @@ function showTodayStoreDrilldown(store){
     if(paid>0){result.push({order:o,todayPaid:paid,isOldOrder:!isToday});}
     else if(isToday&&!(o.payments||[]).length&&o.payMethod!=='暫不付款'&&o.paidAmount>0){result.push({order:o,todayPaid:o.paidAmount,isOldOrder:false});}
   });
+  // Include today's credit top-ups (充值入帳)
+  var topupHTML='';
+  var topupTotal=0;
+  try{
+    var creditsArr=loadCredits();
+    var topups=[];
+    creditsArr.forEach(function(c){
+      (c.transactions||[]).forEach(function(t){
+        if(t.type!=='topup') return;
+        if(toMBD(t.date)!==todayStr) return;
+        var tStore=t.store||'高士德店';
+        if(store!=='all'&&tStore!==store) return;
+        var amt=t.amount||0;
+        if(amt<=0) return;
+        topups.push({name:c.name||'會員',phone:c.phone||'',store:tStore,amount:amt,date:t.date,note:t.note||''});
+        topupTotal+=amt;
+      });
+    });
+    if(topups.length>0){
+      topupHTML='<div style="margin-top:14px;padding-top:10px;border-top:2px dashed var(--border);">';
+      topupHTML+='<div style="font-size:13px;font-weight:700;color:var(--info);margin-bottom:8px;">💳 充值入帳（'+topups.length+'筆）共 $'+topupTotal+'</div>';
+      topups.forEach(function(t){
+        topupHTML+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">';
+        topupHTML+='<span>'+t.name+(t.phone?' · '+t.phone:'')+' <span style="color:var(--text-muted);font-size:11px;">'+t.store+'</span>'+(t.note?' <span style="color:var(--text-muted);font-size:11px;">'+t.note+'</span>':'')+'</span>';
+        topupHTML+='<span style="font-family:\'DM Mono\',monospace;font-weight:700;color:var(--info);">+$'+t.amount+'</span>';
+        topupHTML+='</div>';
+      });
+      topupHTML+='</div>';
+    }
+  }catch(e){}
   var title='📋 '+(store==='all'?'今日全部收款明細':'今日 '+store+' 收款明細');
   var html=renderOrderDrilldownHTML(title,'今日（'+todayStr+'）所有收到款項',result,true);
+  // Append top-up section to modal
+  html+=topupHTML;
   document.getElementById('modal-content').innerHTML=html;
   document.getElementById('modal-order').classList.add('open');
 }
