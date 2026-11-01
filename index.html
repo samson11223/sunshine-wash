@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026110102 -->
+<!-- v2026110103 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -2588,6 +2588,12 @@ function openOrderModal(id){
       <button class="btn btn-primary btn-block" style="font-size:15px;padding:14px;" id="btn-confirm-order">確認訂單</button>
       <button class="btn btn-secondary" id="btn-edit-order">✏️ 修改訂單</button>
       <button id="btn-toggle-followup" style="padding:10px;border-radius:10px;border:1.5px solid ${o.followUp?'#F5A623':'var(--border)'};background:${o.followUp?'#FFF0E0':'transparent'};color:${o.followUp?'#E07800':'var(--text-muted)'};font-size:13px;font-weight:600;cursor:pointer;text-align:center;">${o.followUp?'🔔 已標記跟單 — 點擊取消':'🔔 標記追蹤跟單'}</button>
+      ${o.followUp?`<div style="background:#FFF8F0;border:1.5px solid #F5A623;border-radius:10px;padding:10px;">
+        <div style="font-size:12px;color:#E07800;font-weight:700;margin-bottom:6px;">📝 跟單記錄</div>
+        <textarea id="followup-note-input" placeholder="填寫跟單備註（例：已致電客戶，等待回覆）" style="width:100%;min-height:70px;padding:8px;border:1px solid #F5A623;border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fff;box-sizing:border-box;resize:vertical;">${o.followUpNote||''}</textarea>
+        ${o.followUpNote?`<div style="font-size:11px;color:#999;margin-top:4px;">上次更新：${o.followUpNoteBy||''} · ${o.followUpNoteAt?fmtDT(o.followUpNoteAt):''}</div>`:''}
+        <button id="btn-save-followup-note" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:none;background:#F5A623;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">儲存備註</button>
+      </div>`:''}
       <button class="btn btn-secondary" id="btn-close-modal">關閉</button>
       <button class="btn btn-sm" style="align-self:flex-start;background:none;border:none;color:var(--text-muted);font-size:12px;padding:0;text-decoration:underline;" id="btn-req-delete">申請刪除訂單（需老闆授權）</button>
     </div>`
@@ -2602,6 +2608,12 @@ function openOrderModal(id){
       <button class="btn btn-success btn-block" style="font-size:15px;padding:14px;" id="btn-collect-order">客戶已取件，訂單完成</button>
       <button class="btn btn-secondary" id="btn-edit-order">✏️ 修改訂單</button>
       <button id="btn-toggle-followup" style="padding:10px;border-radius:10px;border:1.5px solid ${o.followUp?'#F5A623':'var(--border)'};background:${o.followUp?'#FFF0E0':'transparent'};color:${o.followUp?'#E07800':'var(--text-muted)'};font-size:13px;font-weight:600;cursor:pointer;text-align:center;">${o.followUp?'🔔 已標記跟單 — 點擊取消':'🔔 標記追蹤跟單'}</button>
+      ${o.followUp?`<div style="background:#FFF8F0;border:1.5px solid #F5A623;border-radius:10px;padding:10px;">
+        <div style="font-size:12px;color:#E07800;font-weight:700;margin-bottom:6px;">📝 跟單記錄</div>
+        <textarea id="followup-note-input" placeholder="填寫跟單備註（例：已致電客戶，等待回覆）" style="width:100%;min-height:70px;padding:8px;border:1px solid #F5A623;border-radius:8px;font-family:inherit;font-size:13px;outline:none;background:#fff;box-sizing:border-box;resize:vertical;">${o.followUpNote||''}</textarea>
+        ${o.followUpNote?`<div style="font-size:11px;color:#999;margin-top:4px;">上次更新：${o.followUpNoteBy||''} · ${o.followUpNoteAt?fmtDT(o.followUpNoteAt):''}</div>`:''}
+        <button id="btn-save-followup-note" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:none;background:#F5A623;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">儲存備註</button>
+      </div>`:''}
       <button class="btn btn-danger btn-sm" style="align-self:flex-start;" id="btn-request-refund">${currentRole==='boss'?'老闆執行退款':'申請退款（需老闆授權）'}</button>
       <button class="btn btn-secondary" id="btn-close-modal">關閉</button>
       <button class="btn btn-sm" style="align-self:flex-start;background:none;border:none;color:var(--text-muted);font-size:12px;padding:0;text-decoration:underline;" id="btn-req-delete">申請刪除訂單（需老闆授權）</button>
@@ -2630,6 +2642,7 @@ function openOrderModal(id){
   safeOn('btn-req-delete',     ()=>requestDeleteOrder(oid));
   safeOn('btn-edit-order',     ()=>editOrderToday(oid));
   safeOn('btn-toggle-followup',()=>{ toggleFollowUp(oid,null); openOrderModal(oid); });
+  safeOn('btn-save-followup-note',()=>saveFollowUpNote(oid));
 
   // Installment payment method toggles
   ['cash','machine','transfer','qr'].forEach(k=>{
@@ -2962,10 +2975,26 @@ function toggleFollowUp(orderId, event){
   } else {
     delete orders[idx].followUpAt;
     delete orders[idx].followUpBy;
+    delete orders[idx].followUpNote;
   }
   saveOrders(orders);
   renderOrders();
   renderDashboard();
+}
+function saveFollowUpNote(orderId){
+  const noteEl=document.getElementById('followup-note-input');
+  if(!noteEl) return;
+  const note=noteEl.value.trim();
+  const idx=orders.findIndex(o=>o.id===orderId);
+  if(idx<0) return;
+  orders[idx].followUpNote=note;
+  orders[idx].followUpNoteAt=new Date().toISOString();
+  orders[idx].followUpNoteBy=currentRole;
+  saveOrders(orders);
+  renderOrders();
+  renderDashboard();
+  // Re-open modal to refresh
+  openOrderModal(orderId);
 }
 
 // ==================== ORDER CARD HTML ====================
@@ -2981,6 +3010,7 @@ function orderCardHTML(o){
   const deadlineBadge=o.deadline&&o.status!=='done'?'<span style="font-size:11px;background:#FFF8E7;color:var(--sun-dark);padding:2px 8px;border-radius:10px;border:1px solid var(--sun);">⏰ '+o.deadline.slice(5)+'</span>':'';
   const followBadge=o.followUp?'<span style="font-size:11px;background:#FFF0E0;color:#E07800;padding:2px 8px;border-radius:10px;border:1px solid #F5A623;">🔔 跟單</span>':'';
   const followBtn=o.status!=='done'?`<button onclick="toggleFollowUp('${o.id}',event)" style="margin-left:auto;padding:3px 9px;border-radius:10px;border:1px solid ${o.followUp?'#F5A623':'var(--border)'};background:${o.followUp?'#FFF0E0':'transparent'};color:${o.followUp?'#E07800':'var(--text-muted)'};font-size:11px;font-weight:600;cursor:pointer;">${o.followUp?'🔔 已標記':'🔔 跟單'}</button>`:'';
+  const followNoteBar=o.followUp&&o.followUpNote?`<div style="margin-top:6px;padding:6px 10px;background:#FFF8F0;border-left:3px solid #F5A623;border-radius:0 6px 6px 0;font-size:12px;color:#8B5000;">📝 ${o.followUpNote}</div>`:'';
   return `<div class="order-card${overdue?' overdue':''}${o.followUp?' follow-up':''}" onclick="openOrderModal('${o.id}')" style="${o.followUp?'border-left:4px solid #F5A623;':''}">
     <div class="order-card-top">
       <div>
@@ -2997,6 +3027,7 @@ function orderCardHTML(o){
       <span style="font-size:11px;color:var(--text-muted);">${fmt(o.createdAt)}</span>
       ${followBtn}
     </div>
+    ${followNoteBar}
   </div>`;
 }
 
