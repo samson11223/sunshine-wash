@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026110101 -->
+<!-- v2026110102 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -622,11 +622,13 @@
     <div id="phone-fuzzy-hint"></div>
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab(this,'tab-pending')">待取件</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-followup')" id="tab-btn-followup">🔔 跟單</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-unpaid')">未付清</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-done')">已完成</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-all')">全部訂單</button>
     </div>
     <div id="tab-pending" class="tab-content active"><div id="pending-list" class="orders-list"></div></div>
+    <div id="tab-followup" class="tab-content"><div id="followup-orders-list" class="orders-list"></div></div>
     <div id="tab-unpaid" class="tab-content"><div id="unpaid-list" class="orders-list"></div></div>
     <div id="tab-done" class="tab-content"><div id="done-list" class="orders-list"></div></div>
     <div id="tab-all" class="tab-content"><div id="all-list" class="orders-list"></div></div>
@@ -3067,12 +3069,27 @@ function renderOrders(){
   const unpaid=all.filter(o=>o.status!=='done'&&(o.balanceDue||0)>0);
   const done=all.filter(o=>o.status==='done');
   const pendingAndConfirmed=[...pending,...confirmed];
+  // Follow-up: all orders marked for follow-up (not just filtered), excluding done
+  const followupAll=orders.filter(o=>o.followUp&&o.status!=='done').sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
 
   const empty='<div class="empty-state"><div class="icon">📋</div>沒有符合的訂單</div>';
   document.getElementById('pending-list').innerHTML=pendingAndConfirmed.length?pendingAndConfirmed.map(o=>orderCardHTML(o)).join(''):empty;
   document.getElementById('unpaid-list').innerHTML=unpaid.length?unpaid.map(o=>orderCardHTML(o)).join(''):empty;
   document.getElementById('done-list').innerHTML=done.length?done.map(o=>orderCardHTML(o)).join(''):empty;
   document.getElementById('all-list').innerHTML=all.length?all.map(o=>orderCardHTML(o)).join(''):empty;
+
+  // Follow-up tab
+  const followupEl=document.getElementById('followup-orders-list');
+  const followupTabBtn=document.getElementById('tab-btn-followup');
+  if(followupEl){
+    if(followupAll.length>0){
+      followupEl.innerHTML=followupAll.map(o=>orderCardHTML(o)).join('');
+      if(followupTabBtn) followupTabBtn.innerHTML='🔔 跟單 <span style="background:#E07800;color:#fff;font-size:10px;border-radius:8px;padding:1px 6px;margin-left:2px;">'+followupAll.length+'</span>';
+    } else {
+      followupEl.innerHTML='<div class="empty-state"><div class="icon">🔔</div>沒有需要跟進的訂單</div>';
+      if(followupTabBtn) followupTabBtn.innerHTML='🔔 跟單';
+    }
+  }
 }
 
 // ==================== SHARED DRILLDOWN RENDERER ====================
