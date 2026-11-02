@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026110105 -->
+<!-- v2026110106 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -2602,6 +2602,11 @@ function openOrderModal(id){
         <span style="font-size:13px;color:var(--text-muted)">/ ${balDue}</span>
         <button class="btn btn-primary" id="btn-installment-pay" style="white-space:nowrap;">確認補付</button>
       </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="actual-pay-date-toggle" style="width:16px;height:16px;cursor:pointer;">
+        <label for="actual-pay-date-toggle" style="font-size:12px;color:var(--text-muted);cursor:pointer;">指定實際付款日期（預設為今日）</label>
+        <input type="date" id="actual-pay-date" style="display:none;padding:6px 10px;border:1.5px solid var(--sun);border-radius:8px;font-size:13px;outline:none;background:var(--surface2);" value="${new Date(Date.now()+8*3600000).toISOString().slice(0,10)}">
+      </div>
     </div>`:''}
     ${hasPendingRefund?'<div class="notice" style="background:#FFF3DC;color:#8B5A00;border-left:3px solid var(--sun);margin-top:10px;">有 '+pendingRefunds.length+' 個待審核退款申請，請 Samson 登入審核。</div>':''}
 
@@ -2666,6 +2671,15 @@ function openOrderModal(id){
     });
   });
 
+  // Toggle actual pay date picker
+  const togEl=document.getElementById('actual-pay-date-toggle');
+  const datEl=document.getElementById('actual-pay-date');
+  if(togEl&&datEl){
+    togEl.addEventListener('change',function(){
+      datEl.style.display=this.checked?'inline-block':'none';
+    });
+  }
+
   safeOn('btn-installment-pay', ()=>{
     const method = window._installmentMethod;
     if(!method){alert('請選擇補付方式');return;}
@@ -2675,14 +2689,22 @@ function openOrderModal(id){
     const o2 = orders[idx2];
     const maxPay = o2.balanceDue||0;
     if(amt<=0||amt>maxPay){alert(`請輸入有效金額（最多 MOP ${maxPay}）`);return;}
+    // Determine payment date: use selected date or now
+    const useActualDate=document.getElementById('actual-pay-date-toggle')&&document.getElementById('actual-pay-date-toggle').checked;
+    let payDateISO=new Date().toISOString();
+    if(useActualDate){
+      const sel=document.getElementById('actual-pay-date').value; // YYYY-MM-DD
+      if(sel) payDateISO=new Date(sel+'T12:00:00+08:00').toISOString();
+    }
     orders[idx2].paidAmount=(o2.paidAmount||0)+amt;
     orders[idx2].balanceDue=Math.max(0,maxPay-amt);
     orders[idx2].payments=orders[idx2].payments||[];
-    orders[idx2].payments.push({amount:amt,method:method+'（補付）',date:new Date().toISOString()});
+    orders[idx2].payments.push({amount:amt,method:method+'（補付）',date:payDateISO,actualDateOverride:useActualDate||undefined});
     if(orders[idx2].balanceDue===0) orders[idx2].payStatus='paid';
-    if(method==='現金') updateCashClose(o2.store, amt);
+    if(method==='現金'&&!useActualDate) updateCashClose(o2.store, amt); // only affect today's cash if paying today
     saveOrders(orders);
-    alert(`已記錄補付 MOP ${amt}，剩餘欠款 MOP ${orders[idx2].balanceDue}`);
+    const dateLabel=useActualDate?`（記錄為 ${document.getElementById('actual-pay-date').value}）`:'';
+    alert(`已記錄補付 MOP ${amt}${dateLabel}，剩餘欠款 MOP ${orders[idx2].balanceDue}`);
     openOrderModal(oid);
   });
 
