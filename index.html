@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026110104 -->
+<!-- v2026110105 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -833,6 +833,8 @@ async function pushToCloud(key, data) {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${WORKER_TOKEN}` },
       body: JSON.stringify(data)
     });
+    // After credits are safely in cloud, allow polling to overwrite local again
+    if(key===CREDITS_KEY) localStorage.setItem('cf_credits_ts','0');
   } catch(e) { /* offline - local copy still safe */ }
 }
 async function pullFromCloud(key, fallback) {
@@ -940,7 +942,14 @@ async function initCloudSync() {
         }
       }
       if (d.members)         { localStorage.setItem('cf_members', JSON.stringify(d.members)); members = d.members; }
-      if (d.credits)         { localStorage.setItem('cf_credits', JSON.stringify(d.credits)); credits = d.credits; }
+      if (d.credits) {
+        const localTs=parseInt(localStorage.getItem('cf_credits_ts')||'0');
+        const ageSec=(Date.now()-localTs)/1000;
+        if(ageSec>10){
+          localStorage.setItem('cf_credits', JSON.stringify(d.credits));
+          credits = d.credits;
+        }
+      }
       if (d.categories)      { localStorage.setItem('cf_categories', JSON.stringify(d.categories)); cats = d.categories; }
       if (d.pending_refunds) {
         localStorage.setItem(PENDING_REFUNDS_KEY, JSON.stringify(d.pending_refunds));
@@ -990,7 +999,16 @@ setInterval(async () => {
         if(changed) cloudSave(ORDERS_KEY, orders);
       }
       if(d.members)         { members = d.members; localStorage.setItem('cf_members', JSON.stringify(d.members)); }
-      if(d.credits)         { credits = d.credits; localStorage.setItem('cf_credits', JSON.stringify(d.credits)); }
+      if(d.credits){
+        // Only overwrite local credits if local hasn't been written in the last 10 seconds
+        // This prevents a poll from overwriting a deduction that hasn't pushed to cloud yet
+        const localTs=parseInt(localStorage.getItem('cf_credits_ts')||'0');
+        const ageSec=(Date.now()-localTs)/1000;
+        if(ageSec>10){
+          credits=d.credits;
+          localStorage.setItem('cf_credits',JSON.stringify(d.credits));
+        }
+      }
       if(d.pending_refunds) { localStorage.setItem('cf_pending_refunds', JSON.stringify(d.pending_refunds)); localStorage.setItem(PENDING_REFUNDS_KEY, JSON.stringify(d.pending_refunds)); }
       if(d.cash) {
         const todayBiz=getMacauBizDate();
@@ -1602,8 +1620,12 @@ function loadCredits(){
   try{return JSON.parse(localStorage.getItem('cf_'+CREDITS_KEY))||[];}catch{return [];}
 }
 function saveCredits(d){
+  // Stamp with local write time so polling sync won't overwrite a fresher local copy
+  const payload={data:d,_savedAt:Date.now()};
   localStorage.setItem('cf_'+CREDITS_KEY,JSON.stringify(d));
-  cloudSave(CREDITS_KEY,d);
+  localStorage.setItem('cf_credits_ts',String(payload._savedAt));
+  // Push immediately (no debounce) so cloud is updated before next poll
+  pushToCloud(CREDITS_KEY,d);
 }
 let credits=loadCredits();
 
