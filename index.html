@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026110106 -->
+<!-- v2026110107 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -621,12 +621,13 @@
     </div>
     <div id="phone-fuzzy-hint"></div>
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab(this,'tab-pending')">待取件</button>
+      <button class="tab-btn active" onclick="switchTab(this,'tab-pending')" id="tab-btn-pending">待取件</button>
       <button class="tab-btn" onclick="switchTab(this,'tab-followup')" id="tab-btn-followup">🔔 跟單</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-unpaid')">未付清</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-done')">已完成</button>
-      <button class="tab-btn" onclick="switchTab(this,'tab-all')">全部訂單</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-unpaid')" id="tab-btn-unpaid">未付清</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-done')" id="tab-btn-done">已完成</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-all')" id="tab-btn-all">全部訂單</button>
     </div>
+    <div id="order-count-bar" style="display:none;padding:8px 14px;background:var(--surface2);border-radius:10px;margin-bottom:8px;font-size:13px;color:var(--text-muted);"></div>
     <div id="tab-pending" class="tab-content active"><div id="pending-list" class="orders-list"></div></div>
     <div id="tab-followup" class="tab-content"><div id="followup-orders-list" class="orders-list"></div></div>
     <div id="tab-unpaid" class="tab-content"><div id="unpaid-list" class="orders-list"></div></div>
@@ -3174,6 +3175,30 @@ function renderOrders(){
   document.getElementById('unpaid-list').innerHTML=unpaid.length?unpaid.map(o=>orderCardHTML(o)).join(''):empty;
   document.getElementById('done-list').innerHTML=done.length?done.map(o=>orderCardHTML(o)).join(''):empty;
   document.getElementById('all-list').innerHTML=all.length?all.map(o=>orderCardHTML(o)).join(''):empty;
+
+  // Update tab badges
+  function badge(n){return n>0?` <span style="background:var(--sun);color:#fff;font-size:10px;border-radius:8px;padding:1px 7px;margin-left:3px;font-weight:700;">${n}</span>`:''}
+  const pendingBtn=document.getElementById('tab-btn-pending');
+  if(pendingBtn) pendingBtn.innerHTML='待取件'+badge(pendingAndConfirmed.length);
+  const unpaidBtn=document.getElementById('tab-btn-unpaid');
+  if(unpaidBtn) unpaidBtn.innerHTML='未付清'+badge(unpaid.length);
+  const doneBtn=document.getElementById('tab-btn-done');
+  if(doneBtn) doneBtn.innerHTML='已完成'+badge(done.length);
+  const allBtn=document.getElementById('tab-btn-all');
+  if(allBtn) allBtn.innerHTML='全部訂單'+badge(all.length);
+
+  // Order count summary bar
+  const countBar=document.getElementById('order-count-bar');
+  if(countBar){
+    const hasFilter=q||dateFilter||storeFilter;
+    if(hasFilter){
+      const storeName=storeFilter||'全部店鋪';
+      countBar.style.display='block';
+      countBar.innerHTML=`📊 <b style="color:var(--text);">${storeName}</b> 篩選結果：<b style="color:var(--sun);font-size:15px;">${all.length}</b> 張訂單（待取件 ${pendingAndConfirmed.length}　未付清 ${unpaid.length}　已完成 ${done.length}）`;
+    } else {
+      countBar.style.display='none';
+    }
+  }
 
   // Follow-up tab
   const followupEl=document.getElementById('followup-orders-list');
