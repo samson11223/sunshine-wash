@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026110107 -->
+<!-- v2026112201 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -819,13 +819,15 @@ const WORKER_URL = 'https://sunshine-wash.samson11223.workers.dev';
 const WORKER_TOKEN = 'sunshine2024';
 
 // Cloud sync: save to both localStorage (instant) and cloud (async)
-let _syncTimer = null;
+const _syncTimers = {}; // per-key timers to avoid cross-key cancellation
 function cloudSave(key, data) {
   // Always save locally first for instant response
   localStorage.setItem('cf_' + key, JSON.stringify(data));
-  // Debounced cloud push
-  clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(() => pushToCloud(key, data), 800);
+  // Stamp write time so polling won't overwrite a fresh local copy
+  localStorage.setItem('cf_' + key + '_ts', String(Date.now()));
+  // Debounced cloud push — per-key timer so different keys don't cancel each other
+  clearTimeout(_syncTimers[key]);
+  _syncTimers[key] = setTimeout(() => pushToCloud(key, data), 800);
 }
 async function pushToCloud(key, data) {
   try {
@@ -834,8 +836,8 @@ async function pushToCloud(key, data) {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${WORKER_TOKEN}` },
       body: JSON.stringify(data)
     });
-    // After credits are safely in cloud, allow polling to overwrite local again
-    if(key===CREDITS_KEY) localStorage.setItem('cf_credits_ts','0');
+    // After data is safely in cloud, allow polling to overwrite local again
+    localStorage.setItem('cf_' + key + '_ts', '0');
   } catch(e) { /* offline - local copy still safe */ }
 }
 async function pullFromCloud(key, fallback) {
@@ -933,13 +935,14 @@ async function initCloudSync() {
     if (res.ok) {
       const d = await res.json();
       if (d.orders) {
-        // Migrate old format orders
-        const { orderList, changed } = migrateOrders(d.orders);
-        orders = orderList;
-        localStorage.setItem('cf_orders', JSON.stringify(orders));
-        // Push migrated data back to cloud
-        if (changed) {
-          cloudSave(ORDERS_KEY, orders);
+        // Migrate old format orders — but respect any very-recent local write (< 15s)
+        const localOrderTs=parseInt(localStorage.getItem('cf_orders_ts')||'0');
+        const orderAgeSec=(Date.now()-localOrderTs)/1000;
+        if(orderAgeSec>15){
+          const { orderList, changed } = migrateOrders(d.orders);
+          orders = orderList;
+          localStorage.setItem('cf_orders', JSON.stringify(orders));
+          if (changed) cloudSave(ORDERS_KEY, orders);
         }
       }
       if (d.members)         { localStorage.setItem('cf_members', JSON.stringify(d.members)); members = d.members; }
@@ -993,19 +996,20 @@ setInterval(async () => {
     });
     if(res.ok) {
       const d = await res.json();
-      if(d.orders) {
+      // Helper: only overwrite local if local write was > 15s ago (push has completed by then)
+      function safeOverwrite(key){ const ts=parseInt(localStorage.getItem('cf_'+key+'_ts')||'0'); return (Date.now()-ts)>15000; }
+      if(d.orders && safeOverwrite(ORDERS_KEY)) {
         const { orderList, changed } = migrateOrders(d.orders);
         orders = orderList;
         localStorage.setItem('cf_orders', JSON.stringify(orders));
         if(changed) cloudSave(ORDERS_KEY, orders);
       }
-      if(d.members)         { members = d.members; localStorage.setItem('cf_members', JSON.stringify(d.members)); }
+      if(d.members && safeOverwrite(MEMBERS_KEY)) { members = d.members; localStorage.setItem('cf_members', JSON.stringify(d.members)); }
       if(d.credits){
-        // Only overwrite local credits if local hasn't been written in the last 10 seconds
-        // This prevents a poll from overwriting a deduction that hasn't pushed to cloud yet
+        // Only overwrite local credits if local hasn't been written in the last 15 seconds
         const localTs=parseInt(localStorage.getItem('cf_credits_ts')||'0');
         const ageSec=(Date.now()-localTs)/1000;
-        if(ageSec>10){
+        if(ageSec>15){
           credits=d.credits;
           localStorage.setItem('cf_credits',JSON.stringify(d.credits));
         }
