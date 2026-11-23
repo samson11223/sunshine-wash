@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026112201 -->
+<!-- v2026112202 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -820,25 +820,48 @@ const WORKER_TOKEN = 'sunshine2024';
 
 // Cloud sync: save to both localStorage (instant) and cloud (async)
 const _syncTimers = {}; // per-key timers to avoid cross-key cancellation
+// _localWriteTs[key] = timestamp of last local write for THIS device session
+// Used to block poll overwrites while a push is in-flight
+const _localWriteTs = {};
+// _pushInFlight[key] = true while a pushToCloud is pending/running
+const _pushInFlight = {};
+
 function cloudSave(key, data) {
-  // Always save locally first for instant response
+  // Save locally immediately
   localStorage.setItem('cf_' + key, JSON.stringify(data));
-  // Stamp write time so polling won't overwrite a fresh local copy
-  localStorage.setItem('cf_' + key + '_ts', String(Date.now()));
-  // Debounced cloud push — per-key timer so different keys don't cancel each other
+  // Record local write time for this session (in-memory, not localStorage)
+  _localWriteTs[key] = Date.now();
+  // Per-key debounce — different keys never cancel each other
   clearTimeout(_syncTimers[key]);
+  _pushInFlight[key] = true;
   _syncTimers[key] = setTimeout(() => pushToCloud(key, data), 800);
 }
 async function pushToCloud(key, data) {
+  // Attach a write timestamp so other devices can compare freshness
+  const writeTs = _localWriteTs[key] || Date.now();
   try {
-    await fetch(`${WORKER_URL}/data/${key}`, {
+    const res = await fetch(`${WORKER_URL}/data/${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${WORKER_TOKEN}` },
-      body: JSON.stringify(data)
+      body: JSON.stringify({ value: data, _ts: writeTs })
     });
-    // After data is safely in cloud, allow polling to overwrite local again
-    localStorage.setItem('cf_' + key + '_ts', '0');
-  } catch(e) { /* offline - local copy still safe */ }
+    if(res.ok) {
+      // Push succeeded — update the cloud-confirmed timestamp in localStorage
+      // so this device knows what version is now in cloud
+      localStorage.setItem('cf_' + key + '_cloud_ts', String(writeTs));
+    }
+  } catch(e) { /* offline */ }
+  finally { _pushInFlight[key] = false; }
+}
+// Unwrap cloud response: handles both old format {value: [...]} and new {value: {value:[...], _ts:N}}
+function unwrapCloudValue(raw) {
+  if(raw === null || raw === undefined) return null;
+  // New format: {value: [...], _ts: N}
+  if(raw && typeof raw === 'object' && !Array.isArray(raw) && '_ts' in raw) {
+    return { data: raw.value, ts: raw._ts };
+  }
+  // Old format: raw is the data directly
+  return { data: raw, ts: 0 };
 }
 async function pullFromCloud(key, fallback) {
   // Try cloud first, fall back to localStorage
@@ -849,8 +872,11 @@ async function pullFromCloud(key, fallback) {
     if (res.ok) {
       const d = await res.json();
       if (d.value !== null && d.value !== undefined) {
-        localStorage.setItem('cf_' + key, JSON.stringify(d.value));
-        return d.value;
+        const unwrapped = unwrapCloudValue(d.value);
+        if(unwrapped && unwrapped.data !== null && unwrapped.data !== undefined) {
+          localStorage.setItem('cf_' + key, JSON.stringify(unwrapped.data));
+          return unwrapped.data;
+        }
       }
     }
   } catch(e) { /* offline */ }
@@ -868,14 +894,12 @@ function loadOrders(){
   try{return JSON.parse(localStorage.getItem('cf_'+ORDERS_KEY))||[];}catch{return[];}
 }
 function saveOrders(d){
-  localStorage.setItem('cf_'+ORDERS_KEY, JSON.stringify(d)); // save locally immediately
-  cloudSave(ORDERS_KEY, d); // then sync to cloud
+  cloudSave(ORDERS_KEY, d); // saves locally + stamps _localWriteTs + debounced push
 }
 function loadMembers(){
   try{return JSON.parse(localStorage.getItem('cf_'+MEMBERS_KEY))||[];}catch{return[];}
 }
 function saveMembers(d){
-  localStorage.setItem('cf_'+MEMBERS_KEY, JSON.stringify(d)); // save locally immediately
   cloudSave(MEMBERS_KEY, d);
 }
 function loadCats(){
@@ -924,6 +948,24 @@ function migrateOrders(orderList) {
   return { orderList, changed };
 }
 
+// Apply cloud data for one key — only overwrites local if cloud is strictly newer
+// or if there is no local write in-flight for this device session
+function applyCloudKey(key, rawCloudVal, applyFn) {
+  if(rawCloudVal === null || rawCloudVal === undefined) return false;
+  const unwrapped = unwrapCloudValue(rawCloudVal);
+  if(!unwrapped || unwrapped.data === null || unwrapped.data === undefined) return false;
+  const cloudTs = unwrapped.ts || 0;
+  const localWriteTs = _localWriteTs[key] || 0; // in-memory: set when THIS device wrote
+  const pushPending = _pushInFlight[key] || false;
+  // Block overwrite if this device wrote more recently than the cloud version
+  // AND a push is still in flight (hasn't been confirmed in cloud yet)
+  if(pushPending && localWriteTs > cloudTs) return false;
+  // Also block if we wrote very recently (< 5s) regardless — safety buffer
+  if(localWriteTs > 0 && (Date.now() - localWriteTs) < 5000) return false;
+  applyFn(unwrapped.data);
+  return true;
+}
+
 // Pull all data from cloud on startup
 async function initCloudSync() {
   const banner = document.getElementById('sync-banner');
@@ -934,27 +976,22 @@ async function initCloudSync() {
     });
     if (res.ok) {
       const d = await res.json();
-      if (d.orders) {
-        // Migrate old format orders — but respect any very-recent local write (< 15s)
-        const localOrderTs=parseInt(localStorage.getItem('cf_orders_ts')||'0');
-        const orderAgeSec=(Date.now()-localOrderTs)/1000;
-        if(orderAgeSec>15){
-          const { orderList, changed } = migrateOrders(d.orders);
-          orders = orderList;
-          localStorage.setItem('cf_orders', JSON.stringify(orders));
-          if (changed) cloudSave(ORDERS_KEY, orders);
-        }
-      }
-      if (d.members)         { localStorage.setItem('cf_members', JSON.stringify(d.members)); members = d.members; }
-      if (d.credits) {
-        const localTs=parseInt(localStorage.getItem('cf_credits_ts')||'0');
-        const ageSec=(Date.now()-localTs)/1000;
-        if(ageSec>10){
-          localStorage.setItem('cf_credits', JSON.stringify(d.credits));
-          credits = d.credits;
-        }
-      }
-      if (d.categories)      { localStorage.setItem('cf_categories', JSON.stringify(d.categories)); cats = d.categories; }
+      // On startup, apply cloud data for keys where we have no in-flight local write
+      applyCloudKey(ORDERS_KEY, d.orders, (data) => {
+        const { orderList, changed } = migrateOrders(data);
+        orders = orderList;
+        localStorage.setItem('cf_orders', JSON.stringify(orders));
+        if (changed) cloudSave(ORDERS_KEY, orders);
+      });
+      applyCloudKey(MEMBERS_KEY, d.members, (data) => {
+        members = data;
+        localStorage.setItem('cf_members', JSON.stringify(data));
+      });
+      applyCloudKey(CREDITS_KEY, d.credits, (data) => {
+        credits = data;
+        localStorage.setItem('cf_credits', JSON.stringify(data));
+      });
+      if (d.categories) { localStorage.setItem('cf_categories', JSON.stringify(d.categories)); cats = d.categories; }
       if (d.pending_refunds) {
         localStorage.setItem(PENDING_REFUNDS_KEY, JSON.stringify(d.pending_refunds));
         localStorage.setItem('cf_pending_refunds', JSON.stringify(d.pending_refunds));
@@ -962,23 +999,19 @@ async function initCloudSync() {
       if (d.cash) {
         const todayBiz = getMacauBizDate();
         const localCash = JSON.parse(localStorage.getItem(CASH_KEY)||'{}');
-        // Only overwrite cf_cash if local doesn't already have today's data
         if (localCash.date !== todayBiz) {
           localStorage.setItem('cf_cash', JSON.stringify(d.cash));
         }
-        // Always re-run loadCashUI after getting cloud data (handles carry-forward)
         loadCashUI();
       }
       if(banner) { banner.textContent='☁ 數據已同步'; setTimeout(()=>banner.style.display='none', 2000); }
     } else {
-      // Offline: migrate local orders
       const { orderList, changed } = migrateOrders(orders);
       orders = orderList;
       if (changed) saveOrders(orders);
       if(banner) { banner.textContent='⚠ 使用本地數據（離線模式）'; setTimeout(()=>banner.style.display='none', 3000); }
     }
   } catch(e) {
-    // Offline: migrate local orders
     const { orderList, changed } = migrateOrders(orders);
     orders = orderList;
     if (changed) saveOrders(orders);
@@ -996,25 +1029,26 @@ setInterval(async () => {
     });
     if(res.ok) {
       const d = await res.json();
-      // Helper: only overwrite local if local write was > 15s ago (push has completed by then)
-      function safeOverwrite(key){ const ts=parseInt(localStorage.getItem('cf_'+key+'_ts')||'0'); return (Date.now()-ts)>15000; }
-      if(d.orders && safeOverwrite(ORDERS_KEY)) {
-        const { orderList, changed } = migrateOrders(d.orders);
+      let ordersUpdated = false;
+      applyCloudKey(ORDERS_KEY, d.orders, (data) => {
+        const { orderList, changed } = migrateOrders(data);
         orders = orderList;
         localStorage.setItem('cf_orders', JSON.stringify(orders));
         if(changed) cloudSave(ORDERS_KEY, orders);
+        ordersUpdated = true;
+      });
+      applyCloudKey(MEMBERS_KEY, d.members, (data) => {
+        members = data;
+        localStorage.setItem('cf_members', JSON.stringify(data));
+      });
+      applyCloudKey(CREDITS_KEY, d.credits, (data) => {
+        credits = data;
+        localStorage.setItem('cf_credits', JSON.stringify(data));
+      });
+      if(d.pending_refunds) {
+        localStorage.setItem('cf_pending_refunds', JSON.stringify(d.pending_refunds));
+        localStorage.setItem(PENDING_REFUNDS_KEY, JSON.stringify(d.pending_refunds));
       }
-      if(d.members && safeOverwrite(MEMBERS_KEY)) { members = d.members; localStorage.setItem('cf_members', JSON.stringify(d.members)); }
-      if(d.credits){
-        // Only overwrite local credits if local hasn't been written in the last 15 seconds
-        const localTs=parseInt(localStorage.getItem('cf_credits_ts')||'0');
-        const ageSec=(Date.now()-localTs)/1000;
-        if(ageSec>15){
-          credits=d.credits;
-          localStorage.setItem('cf_credits',JSON.stringify(d.credits));
-        }
-      }
-      if(d.pending_refunds) { localStorage.setItem('cf_pending_refunds', JSON.stringify(d.pending_refunds)); localStorage.setItem(PENDING_REFUNDS_KEY, JSON.stringify(d.pending_refunds)); }
       if(d.cash) {
         const todayBiz=getMacauBizDate();
         const localCash=JSON.parse(localStorage.getItem(CASH_KEY)||'{}');
@@ -1023,7 +1057,6 @@ setInterval(async () => {
           loadCashUI();
         }
       }
-      // Re-render whichever page is currently active
       if(document.getElementById('page-analytics') && document.getElementById('page-analytics').classList.contains('active')){
         renderAnalytics();
       } else {
@@ -1625,12 +1658,8 @@ function loadCredits(){
   try{return JSON.parse(localStorage.getItem('cf_'+CREDITS_KEY))||[];}catch{return [];}
 }
 function saveCredits(d){
-  // Stamp with local write time so polling sync won't overwrite a fresher local copy
-  const payload={data:d,_savedAt:Date.now()};
-  localStorage.setItem('cf_'+CREDITS_KEY,JSON.stringify(d));
-  localStorage.setItem('cf_credits_ts',String(payload._savedAt));
-  // Push immediately (no debounce) so cloud is updated before next poll
-  pushToCloud(CREDITS_KEY,d);
+  // Use cloudSave so _localWriteTs and _pushInFlight are set properly
+  cloudSave(CREDITS_KEY, d);
 }
 let credits=loadCredits();
 
