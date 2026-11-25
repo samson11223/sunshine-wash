@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026112202 -->
+<!-- v2026112203 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -932,6 +932,17 @@ function migrateOrders(orderList) {
       const total = o.totalAmount || o.amount || 0;
       o.balanceDue = Math.max(0, total - paid);
       o.paidAmount = paid;
+      changed = true;
+    }
+    // Fix: creditDeducted order where paidAmount/balanceDue got corrupted to 0/total
+    // (caused by sync overwriting with stale data that lacked the credit transaction)
+    if ((o.creditDeducted||0) > 0 && o.paidAmount === 0 && (o.balanceDue||0) === (o.totalAmount||o.amount||0)) {
+      const creditAmt = o.creditDeducted;
+      const suppAmt = (o.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
+      const total = o.totalAmount || o.amount || 0;
+      o.paidAmount = Math.min(creditAmt + suppAmt, total);
+      o.balanceDue = Math.max(0, total - o.paidAmount);
+      o.payStatus = o.balanceDue > 0 ? 'partial' : 'paid';
       changed = true;
     }
     // Fix: totalAmount not set
@@ -2630,6 +2641,11 @@ function openOrderModal(id){
         <button class="toggle-btn" id="installment-method-machine" data-method="收銀機">收銀機</button>
         <button class="toggle-btn" id="installment-method-transfer" data-method="網銀轉賬">網銀轉賬</button>
         <button class="toggle-btn" id="installment-method-qr" data-method="付款碼">付款碼</button>
+        <button class="toggle-btn" id="installment-method-credit" data-method="充值扣除">💳 充值扣除</button>
+      </div>
+      <div id="installment-credit-account-row" style="display:none;gap:8px;align-items:center;margin-bottom:8px;">
+        <span style="font-size:12px;color:#7B5EA7;white-space:nowrap;">💳 充值帳戶</span>
+        <select id="installment-credit-account-select" style="flex:1;padding:8px 10px;border:1.5px solid #7B5EA7;border-radius:8px;font-size:13px;outline:none;background:var(--surface2);color:var(--text);"></select>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <input type="number" id="installment-amount" placeholder="補付金額" min="1" max="${balDue}" value="${balDue}" style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'DM Mono',monospace;font-size:16px;font-weight:700;outline:none;">
@@ -2696,14 +2712,36 @@ function openOrderModal(id){
   safeOn('btn-save-followup-note',()=>saveFollowUpNote(oid));
 
   // Installment payment method toggles
-  ['cash','machine','transfer','qr'].forEach(k=>{
+  ['cash','machine','transfer','qr','credit'].forEach(k=>{
     const btn=document.getElementById('installment-method-'+k);
     if(btn) btn.addEventListener('click', function(){
       document.querySelectorAll('[id^="installment-method-"]').forEach(b=>b.classList.remove('selected'));
       this.classList.add('selected');
       window._installmentMethod = this.dataset.method;
+      // Show/hide credit account selector
+      const creditSel=document.getElementById('installment-credit-account-row');
+      if(creditSel) creditSel.style.display=(k==='credit')?'flex':'none';
     });
   });
+  // Populate credit account selector for 補付
+  (function(){
+    const creditSel=document.getElementById('installment-credit-account-row');
+    if(!creditSel) return;
+    const selEl=document.getElementById('installment-credit-account-select');
+    if(!selEl) return;
+    selEl.innerHTML='<option value="">-- 選擇充值帳戶 --</option>';
+    // Pre-populate: if order has a creditAccountId, prefer that account
+    const orderIdx=orders.findIndex(x=>x.id===oid);
+    const thisOrder=orderIdx!==-1?orders[orderIdx]:null;
+    credits.forEach(c=>{
+      const bal=getCreditBalance(c);
+      const opt=document.createElement('option');
+      opt.value=c.id;
+      opt.textContent=`${c.name}（${c.phone||''}）餘額 MOP ${bal}`;
+      if(thisOrder&&thisOrder.creditAccountId===c.id) opt.selected=true;
+      selEl.appendChild(opt);
+    });
+  })();
 
   // Toggle actual pay date picker
   const togEl=document.getElementById('actual-pay-date-toggle');
@@ -2723,6 +2761,34 @@ function openOrderModal(id){
     const o2 = orders[idx2];
     const maxPay = o2.balanceDue||0;
     if(amt<=0||amt>maxPay){alert(`請輸入有效金額（最多 MOP ${maxPay}）`);return;}
+    // Handle credit deduction supplementary payment
+    if(method==='充值扣除'){
+      const selEl=document.getElementById('installment-credit-account-select');
+      const creditId=selEl?selEl.value:'';
+      if(!creditId){alert('請選擇充值帳戶');return;}
+      credits=loadCredits();
+      const creditAccIdx=credits.findIndex(c=>c.id===creditId);
+      if(creditAccIdx===-1){alert('找不到充值帳戶');return;}
+      const creditAcc=credits[creditAccIdx];
+      const bal=getCreditBalance(creditAcc);
+      if(amt>bal){alert(`充值餘額不足，目前餘額 MOP ${bal}，補付金額 MOP ${amt}`);return;}
+      if(!confirm(`確認從 ${creditAcc.name} 的充值帳戶扣除 MOP ${amt}？`))return;
+      // Deduct from credit account
+      credits[creditAccIdx].transactions.push({id:'TX'+Date.now(),type:'use',amount:amt,date:new Date().toISOString(),note:'訂單補付（充值扣除）訂單號：'+oid,addedBy:currentRole});
+      saveCredits(credits);
+      // Update order
+      orders[idx2].paidAmount=(o2.paidAmount||0)+amt;
+      orders[idx2].balanceDue=Math.max(0,maxPay-amt);
+      orders[idx2].payments=orders[idx2].payments||[];
+      orders[idx2].payments.push({amount:amt,method:'充值扣除（補付）',date:new Date().toISOString()});
+      if(orders[idx2].balanceDue===0){orders[idx2].payStatus='paid';orders[idx2].payMethod=(o2.payMethod||'')+'／充值補付';}
+      orders[idx2].creditDeducted=(o2.creditDeducted||0)+amt;
+      orders[idx2].creditAccountId=orders[idx2].creditAccountId||creditId;
+      saveOrders(orders);
+      alert(`✅ 充值帳戶扣除 MOP ${amt}，剩餘欠款 MOP ${orders[idx2].balanceDue}`);
+      openOrderModal(oid);
+      return;
+    }
     // Determine payment date: use selected date or now
     const useActualDate=document.getElementById('actual-pay-date-toggle')&&document.getElementById('actual-pay-date-toggle').checked;
     let payDateISO=new Date().toISOString();
