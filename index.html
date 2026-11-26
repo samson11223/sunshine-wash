@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026112203 -->
+<!-- v2026112204 -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -3330,7 +3330,7 @@ function renderDrilldownList(items){
       var phone=o.custPhone&&!o.custPhone.startsWith('無電話')?o.custPhone:'';
       var pays=(o.payments||[]).filter(function(p){return !p.migrated;});
       var pb=pays.length?pays.map(function(p){return '$'+p.amount+' '+p.method.replace('（補付）','');}).join(' + '):(o.payMethod||'');
-      g+='<div onclick="openOrderModal(\'+o.id+\')" style="padding:10px 12px;background:var(--surface2);border-radius:8px;margin-bottom:6px;cursor:pointer;border-left:3px solid '+c+';">';
+      g+='<div onclick="openOrderModal(\''+o.id+'\')" style="padding:10px 12px;background:var(--surface2);border-radius:8px;margin-bottom:6px;cursor:pointer;border-left:3px solid '+c+';">';
       g+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px;">';
       g+='<div><span style="display:inline-block;font-size:10px;font-weight:700;color:'+c+';background:'+c+'18;padding:1px 7px;border-radius:10px;margin-bottom:2px;">'+o.store+'</span><br>';
       g+='<span style="font-weight:600;font-size:14px;">'+o.custName+(phone?' <span style="font-weight:400;font-size:11px;color:var(--text-muted)">'+phone+'</span>':'')+'</span></div>';
