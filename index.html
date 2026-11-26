@@ -6,7 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026112204 -->
+<!-- v2026112205 -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
@@ -2094,7 +2097,6 @@ function collectOrder(id){
   if((o.balanceDue||0)>0){
     // Show inline confirmation in modal instead of confirm()
     const modalContent=document.getElementById('modal-content');
-    const existingContent=modalContent.innerHTML;
     modalContent.innerHTML=`
       <div style="text-align:center;padding:20px 0;">
         <div style="font-size:36px;margin-bottom:12px;">⚠️</div>
@@ -2102,13 +2104,13 @@ function collectOrder(id){
         <div style="font-size:22px;font-weight:700;color:var(--danger);margin-bottom:16px;">MOP ${o.balanceDue}</div>
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">確認尾款已收取後，方可完成訂單。</div>
         <div style="display:flex;flex-direction:column;gap:8px;">
-          <button class="btn btn-success btn-block" style="font-size:15px;padding:14px;" onclick="window._doFinish('${id}')">確認尾款已收，完成訂單</button>
-          <button class="btn btn-secondary" onclick="openOrderModal('${id}')">返回訂單</button>
+          <button class="btn btn-success btn-block" style="font-size:15px;padding:14px;" id="btn-do-finish">確認尾款已收，完成訂單</button>
+          <button class="btn btn-secondary" id="btn-back-to-order">返回訂單</button>
         </div>
       </div>
     `;
-    window._doFinish=(oid)=>{
-      const i2=orders.findIndex(x=>x.id===oid);
+    document.getElementById('btn-do-finish').addEventListener('click',()=>{
+      const i2=orders.findIndex(x=>x.id===id);
       const o2=orders[i2];
       const finalBal=o2.balanceDue;
       orders[i2].paidAmount=(o2.paidAmount||0)+finalBal;
@@ -2122,7 +2124,8 @@ function collectOrder(id){
       closeModal('modal-order');
       renderOrders();
       renderDashboard();
-    };
+    });
+    document.getElementById('btn-back-to-order').addEventListener('click',()=>openOrderModal(id));
   } else {
     // No balance due — show inline confirm
     const modalContent=document.getElementById('modal-content');
@@ -2132,20 +2135,21 @@ function collectOrder(id){
         <div style="font-size:16px;font-weight:700;margin-bottom:16px;">確認客戶已取件？</div>
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:20px;">此操作完成後訂單將歸入已完成，無法撤銷。</div>
         <div style="display:flex;flex-direction:column;gap:8px;">
-          <button class="btn btn-success btn-block" style="font-size:15px;padding:14px;" onclick="window._doFinishFull('${id}')">確認，完成訂單</button>
-          <button class="btn btn-secondary" onclick="openOrderModal('${id}')">返回訂單</button>
+          <button class="btn btn-success btn-block" style="font-size:15px;padding:14px;" id="btn-do-finish-full">確認，完成訂單</button>
+          <button class="btn btn-secondary" id="btn-back-to-order-full">返回訂單</button>
         </div>
       </div>
     `;
-    window._doFinishFull=(oid)=>{
-      const i2=orders.findIndex(x=>x.id===oid);
+    document.getElementById('btn-do-finish-full').addEventListener('click',()=>{
+      const i2=orders.findIndex(x=>x.id===id);
       orders[i2].status='done';
       orders[i2].completedAt=new Date().toISOString();
       saveOrders(orders);
       closeModal('modal-order');
       renderOrders();
       renderDashboard();
-    };
+    });
+    document.getElementById('btn-back-to-order-full').addEventListener('click',()=>openOrderModal(id));
   }
 }
 
