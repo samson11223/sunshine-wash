@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>太陽專業清洗 · 管理系統</title>
-<!-- v2026112205 -->
+<!-- v2026112206 -->
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -2267,9 +2267,10 @@ function completeOrder(id){ collectOrder(id); }
 const PENDING_REFUNDS_KEY='spc_pending_refunds_v1';
 function loadPendingRefunds(){
   try{
-    // Try cloud cache first
-    const cloud=JSON.parse(localStorage.getItem('cf_pending_refunds'));
-    if(cloud) return cloud;
+    // Try cloud cache first (may be wrapped in {value, _ts} envelope from cloudSave)
+    let cloud=JSON.parse(localStorage.getItem('cf_pending_refunds'));
+    if(cloud&&cloud.value) cloud=cloud.value;
+    if(Array.isArray(cloud)) return cloud;
     return JSON.parse(localStorage.getItem(PENDING_REFUNDS_KEY))||[];
   }catch{return[];}
 }
